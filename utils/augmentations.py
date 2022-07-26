@@ -21,15 +21,28 @@ class Albumentations:
             import albumentations as A
             check_version(A.__version__, '1.0.3', hard=True)  # version requirement
 
-            T = [
-                A.Blur(p=0.01),
-                A.MedianBlur(p=0.01),
-                A.ToGray(p=0.01),
-                A.CLAHE(p=0.01),
-                A.RandomBrightnessContrast(p=0.0),
-                A.RandomGamma(p=0.0),
-                A.ImageCompression(quality_lower=75, p=0.0)]  # transforms
-            self.transform = A.Compose(T, bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
+            T1 = [
+                A.HueSaturationValue(4, 90, 50, p=1.),
+                A.RandomGamma((70, 150), p=0.25),
+            ]
+            T2 = [
+                A.RGBShift((-5, 25), (-25, 5), (-5, 25), p=0.4),
+                A.RandomBrightnessContrast(0.05, 0.1, p=0.9),
+                A.RandomGamma((70, 350), p=0.9),
+            ]
+            Tpost = [
+                A.CLAHE(p=0.05),
+                A.ImageCompression(60, 90, p=0.1),
+                A.OneOf([
+                    A.GaussNoise((10, 200)),
+                    A.MultiplicativeNoise((0.85, 1.15)),
+                    A.ISONoise()
+                ], p=0.15)
+            ]
+            T1 = A.Compose(T1 + Tpost, bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
+            T2 = A.Compose(T2 + Tpost, bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
+            self.transform = A.OneOf([T1, T2], p = 1.)
+            # self.transform = A.Compose(T, bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
 
             LOGGER.info(colorstr('albumentations: ') + ', '.join(f'{x}' for x in self.transform.transforms if x.p))
         except ImportError:  # package not installed, skip

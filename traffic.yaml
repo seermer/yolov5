@@ -1,0 +1,15 @@
+path: ../single
+train: autosplit_train.txt
+val: autosplit_val.txt
+
+# number of classes
+nc: 7
+
+# class names
+names: ['Car',
+'Truck',
+'Van',
+'Bus',
+'Motorcyclist',
+'Cyclist',
+'Pedestrian']
