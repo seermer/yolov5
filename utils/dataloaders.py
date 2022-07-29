@@ -718,9 +718,9 @@ class LoadImagesAndLabels(Dataset):
             elif random.random() < 0.5:
                 view = img[y1b:y2b, x1b:x2b]
                 loc = (random.randint(x1b, x2b - 10), random.randint(y1b + 5, y2b - 5))
-                txt = "".join([chr(random.randint(32, 126)) for _ in range(random.randint(2, 10))])
+                txt = "".join([chr(random.randint(32, 126)) for _ in range(random.randint(2, 12))])
                 color = [random.randint(0, 255) for _ in range(3)]
-                img[y1b:y2b, x1b:x2b] = cv2.putText(view, txt, loc, random.randint(0, 7), random.uniform(1., 5.), color, random.randint(1, 5))
+                img[y1b:y2b, x1b:x2b] = cv2.putText(view, txt, loc, random.randint(0, 7), random.uniform(1., 10.), color, random.randint(1, 6))
                 
             img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
             labels4.append(labels)

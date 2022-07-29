@@ -34,6 +34,23 @@ def autopad(k, p=None):  # kernel, padding
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
     return p
 
+class SE(nn.Module):
+    # Squeeze and Excitation
+    def __init__(self, c, factor=16):
+        super().__init__()
+        c_ = int(round(c / factor / 8) * 8)
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.squeeze = nn.Conv2d(c, c_, 1)
+        self.act = nn.SiLU()
+        self.excite = nn.Conv2d(c_, c, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        scaled = self.pool(x)
+        scaled = self.act(self.squeeze(scaled))
+        scaled = self.sigmoid(self.excite(scaled))
+        return x * scaled
+
 
 class Conv(nn.Module):
     # Standard convolution
@@ -100,15 +117,20 @@ class TransformerBlock(nn.Module):
 
 class Bottleneck(nn.Module):
     # Standard bottleneck
-    def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, shortcut, groups, expansion
+    def __init__(self, c1, c2, shortcut=True, g=1, e=0.5, se=False):  # ch_in, ch_out, shortcut, groups, expansion, se
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c_, c2, 3, 1, g=g)
+        self.se = SE(c2, 16) if se else None        
         self.add = shortcut and c1 == c2
 
     def forward(self, x):
-        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+        if hasattr(self, "se") and self.se is not None:
+            return x + self.se(self.cv2(self.cv1(x))) if self.add else self.se(self.cv2(self.cv1(x)))
+        else:
+            return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+            
 
 
 class BottleneckCSP(nn.Module):
@@ -146,13 +168,13 @@ class CrossConv(nn.Module):
 
 class C3(nn.Module):
     # CSP Bottleneck with 3 convolutions
-    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, se=0):  # ch_in, ch_out, number, shortcut, groups, expansion, num_se
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c1, c_, 1, 1)
         self.cv3 = Conv(2 * c_, c2, 1)  # optional act=FReLU(c2)
-        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
+        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, e=1.0, se=i < se) for i in range(n)))
 
     def forward(self, x):
         return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))

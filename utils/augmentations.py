@@ -32,7 +32,10 @@ class Albumentations:
             ]
             Tpost = [
                 A.CLAHE(p=0.05),
-                A.ImageCompression(60, 90, p=0.1),
+                A.OneOf([
+                    A.Downscale(0.5, 0.9),
+                    A.ImageCompression(60, 90)
+                ], p=0.1),  
                 A.OneOf([
                     A.GaussNoise((10, 200)),
                     A.MultiplicativeNoise((0.85, 1.15)),
