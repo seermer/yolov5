@@ -726,7 +726,7 @@ class LoadImagesAndLabels(Dataset):
             if labels.size:
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padw, padh)  # normalized xywh to pixel xyxy format
                 segments = [xyn2xy(x, w, h, padw, padh) for x in segments]
-            elif random.random() < 0.8:
+            elif random.random() < 0.75:
                 view = img[y1b:y2b, x1b:x2b]
                 loc = (random.randint(x1b, x2b - 10), random.randint(y1b + 5, y2b - 5))
                 txt = "".join([chr(random.randint(32, 126)) for _ in range(random.randint(2, 15))])
