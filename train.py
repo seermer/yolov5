@@ -47,7 +47,7 @@ from utils.downloads import attempt_download, is_url
 from utils.general import (LOGGER, check_amp, check_dataset, check_file, check_git_status, check_img_size,
                            check_requirements, check_suffix, check_yaml, colorstr, get_latest_run, increment_path,
                            init_seeds, intersect_dicts, labels_to_class_weights, labels_to_image_weights, methods,
-                           one_cycle, print_args, print_mutation, strip_optimizer)
+                           one_cycle, print_args, print_mutation, strip_optimizer, yaml_save)
 from utils.loggers import Loggers
 from utils.loggers.wandb.wandb_utils import check_wandb_resume
 from utils.loss import ComputeLoss
@@ -81,15 +81,15 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
     # Save run settings
     if not evolve:
-        with open(save_dir / 'hyp.yaml', 'w') as f:
-            yaml.safe_dump(hyp, f, sort_keys=False)
-        with open(save_dir / 'opt.yaml', 'w') as f:
-            yaml.safe_dump(vars(opt), f, sort_keys=False)
+        yaml_save(save_dir / 'hyp.yaml', hyp)
+        yaml_save(save_dir / 'opt.yaml', vars(opt))
 
     # Loggers
     data_dict = None
     if RANK in {-1, 0}:
         loggers = Loggers(save_dir, weights, opt, hyp, LOGGER)  # loggers instance
+        if loggers.clearml:
+            data_dict = loggers.clearml.data_dict  # None if no ClearML dataset or filled in by ClearML
         if loggers.wandb:
             data_dict = loggers.wandb.data_dict
             if resume:
@@ -107,8 +107,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         data_dict = data_dict or check_dataset(data)  # check if None
     train_path, val_path = data_dict['train'], data_dict['val']
     nc = 1 if single_cls else int(data_dict['nc'])  # number of classes
-    names = ['item'] if single_cls and len(data_dict['names']) != 1 else data_dict['names']  # class names
-    assert len(names) == nc, f'{len(names)} names found for nc={nc} dataset in {data}'  # check
+    names = {0: 'item'} if single_cls and len(data_dict['names']) != 1 else data_dict['names']  # class names
     is_coco = isinstance(val_path, str) and val_path.endswith('coco/val2017.txt')  # COCO dataset
 
     # Model
@@ -150,7 +149,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     nbs = 64  # nominal batch size
     accumulate = max(round(nbs / batch_size), 1)  # accumulate loss before optimizing
     hyp['weight_decay'] *= batch_size * accumulate / nbs  # scale weight_decay
-    LOGGER.info(f"Scaled weight_decay = {hyp['weight_decay']}")
     optimizer = smart_optimizer(model, opt.optimizer, hyp['lr0'], hyp['momentum'], hyp['weight_decay'])
 
     # Scheduler
@@ -166,7 +164,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     # Resume
     best_fitness, start_epoch = 0.0, 0
     if pretrained:
-        best_fitness, start_epoch, epochs = smart_resume(ckpt, optimizer, ema, weights, epochs, resume)
+        if resume:
+            best_fitness, start_epoch, epochs = smart_resume(ckpt, optimizer, ema, weights, epochs, resume)
         del ckpt, csd
 
     # DP mode
@@ -482,12 +481,11 @@ def main(opt, callbacks=Callbacks()):
     if RANK in {-1, 0}:
         print_args(vars(opt))
         check_git_status()
-        check_requirements(exclude=['thop'])
+        check_requirements()
 
     # Resume
-    if opt.resume and not (check_wandb_resume(opt) or opt.evolve):  # resume an interrupted run
-        last = Path(opt.resume if isinstance(opt.resume, str) else get_latest_run())  # specified or most recent last.pt
-        assert last.is_file(), f'ERROR: --resume checkpoint {last} does not exist'
+    if opt.resume and not (check_wandb_resume(opt) or opt.evolve):  # resume from specified or most recent last.pt
+        last = Path(check_file(opt.resume) if isinstance(opt.resume, str) else get_latest_run())
         opt_yaml = last.parent.parent / 'opt.yaml'  # train options yaml
         opt_data = opt.data  # original dataset
         if opt_yaml.is_file():
@@ -497,8 +495,8 @@ def main(opt, callbacks=Callbacks()):
             d = torch.load(last, map_location='cpu')['opt']
         opt = argparse.Namespace(**d)  # replace
         opt.cfg, opt.weights, opt.resume = '', str(last), True  # reinstate
-        if is_url(opt.data):
-            opt.data = str(opt_data)  # avoid HUB resume auth timeout
+        if is_url(opt_data):
+            opt.data = check_file(opt_data)  # avoid HUB resume auth timeout
     else:
         opt.data, opt.cfg, opt.hyp, opt.weights, opt.project = \
             check_file(opt.data), check_yaml(opt.cfg), check_yaml(opt.hyp), str(opt.weights), str(opt.project)  # checks
@@ -527,9 +525,6 @@ def main(opt, callbacks=Callbacks()):
     # Train
     if not opt.evolve:
         train(opt.hyp, opt, device, callbacks)
-        if WORLD_SIZE > 1 and RANK == 0:
-            LOGGER.info('Destroying process group... ')
-            dist.destroy_process_group()
 
     # Evolve hyperparameters (optional)
     else:
@@ -569,6 +564,8 @@ def main(opt, callbacks=Callbacks()):
             hyp = yaml.safe_load(f)  # load hyps dict
             if 'anchors' not in hyp:  # anchors commented in hyp.yaml
                 hyp['anchors'] = 3
+        if opt.noautoanchor:
+            del hyp['anchors'], meta['anchors']
         opt.noval, opt.nosave, save_dir = True, True, Path(opt.save_dir)  # only val/save final epoch
         # ei = [isinstance(x, (int, float)) for x in hyp.values()]  # evolvable indices
         evolve_yaml, evolve_csv = save_dir / 'hyp_evolve.yaml', save_dir / 'evolve.csv'
